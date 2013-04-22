@@ -1,8 +1,6 @@
 Halo Event Connector Script - Python
 ==================
-For sake of brevity, the document “Halo Event Connector” only covers integrating Halo events with the Splunk Enterprise Server SIEM tool.
-
-However, given the number of different output formats the script supports, you will just as easily be able to integrate Halo events into other popular SIEM tools, such as ArcSight and Sumo Logic to name a few, or with your Syslog infrastructure.
+In this repo we have included the pdf documentation for using these scripts to pull Halo event alerts into either Sumo Logic or Splunk - however, you will just as easily be able to integrate Halo events into other popular SIEM tools, such as ArcSight, or with your Syslog infrastructure.
 
 In addition, there are several ways you can run this script to stream event data to your desired target.
 
