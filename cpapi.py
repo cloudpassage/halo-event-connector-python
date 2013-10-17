@@ -87,7 +87,13 @@ class CPAPI:
         req.add_header("Authorization", "Bearer " + token)
         try:
             fh = urllib2.urlopen(req)
-            return (fh.read(), False)
+            data = fh.read()
+            contentType = fh.info().getheader('Content-type')
+            (mimetype, encoding) = contentType.split("charset=")
+            # print >> sys.stderr, "Type=%s  Encoding=%s" % (mimetype, encoding)
+            translatedData = data.decode(encoding,'ignore').encode('utf-8')
+            results = (translatedData, False)
+            return results
         except IOError, e:
             authError = False
             if hasattr(e, 'reason'):
@@ -95,8 +101,9 @@ class CPAPI:
             elif hasattr(e, 'code'):
                 msg = self.getHttpStatus(e.code)
                 print >> sys.stderr, "Failed to fetch events [%s] from '%s'" % (msg, url)
-                if (e.code == 401):
+                if (e.code == 401) or (e.code == 403):
                     authError = True
+                print >> sys.stderr, "Error response: %s" % e.read()
             else:
                 print >> sys.stderr, "Unknown error fetching '%s'" % url
             return (None, authError)
@@ -117,8 +124,9 @@ class CPAPI:
             if hasattr(e, 'code'):
                 msg = self.getHttpStatus(e.code)
                 print >> sys.stderr, "Failed to make request: [%s] from '%s'" % (msg, url)
-                if (e.code == 401):
+                if (e.code == 401) or (e.code == 403):
                     authError = True
+                print >> sys.stderr, "Error response: %s" % e.read()
             if (not hasattr(e, 'reason')) and (not hasattr(e, 'code')):
                 print >> sys.stderr, "Unknown error fetching '%s'" % url
             return (None, authError)
@@ -138,8 +146,9 @@ class CPAPI:
             if hasattr(e, 'code'):
                 msg = self.getHttpStatus(e.code)
                 print >> sys.stderr, "Failed to make request: [%s] from '%s'" % (msg, url)
-                if (e.code == 401):
+                if (e.code == 401) or (e.code == 403):
                     authError = True
+                print >> sys.stderr, "Error response: %s" % e.read()
             if (not hasattr(e, 'reason')) and (not hasattr(e, 'code')):
                 print >> sys.stderr, "Unknown error fetching '%s'" % url
             return (None, authError)
@@ -218,6 +227,16 @@ class CPAPI:
         jsonData = json.dumps(policyData)
         # print jsonData # for debugging
         (data, authError) = self.doPostRequest(url, self.authToken, jsonData)
+        if (data):
+            return (json.loads(data), authError)
+        else:
+            return (None, authError)
+
+    def assignFirewallPolicyToGroup(self, groupID, attrName, policyID):
+        url = "%s:%d/%s/groups/%s" % (self.base_url, self.port, self.api_ver, groupID)
+        reqData = {"group": { attrName: policyID}}
+        jsonData = json.dumps(reqData)
+        (data, authError) = self.doPutRequest(url, self.authToken, jsonData)
         if (data):
             return (json.loads(data), authError)
         else:
