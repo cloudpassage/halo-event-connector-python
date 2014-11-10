@@ -10,6 +10,7 @@ import threading
 import ast
 import time
 import signal
+import datetime
 
 import cpapi
 import cputils
@@ -50,6 +51,13 @@ except ImportError:
     except ImportError:
         redisAvailable = False
 
+botoAvailable = True
+try:
+    from boto.s3.connection import S3Connection
+    from boto.s3.connection import Key
+except:
+    botoAvailable = False
+
 # global vars
 shouldExit = False
 events_per_page = 100
@@ -76,6 +84,15 @@ syslogInfo = None
 outfp = None
 fileAppend = True
 configDir = None
+configOnS3 = False
+bucketName = None
+s3conn = None
+s3lock = 'lock'
+eventCountLimit = None
+batchWaitTime = None
+threadCount = 0
+outputQueue = {}
+threadList = {}
 
 # config vars for optional redis output
 redis_host = None
@@ -88,6 +105,127 @@ redisLockToken = binascii.b2a_hex(os.urandom(15))
 redisAccountTimePrefix = "lastTimestamp."
 redisUnreadPrefix = "unread."
 haConfigFile = "ha.config"
+
+# constants used for LEEF output
+leefFormatVersion = "1.0"
+leefFieldMapping = {
+    "actor_username": "usrName",
+    "server_ip_address": "src",
+    "server_hostname": "srcName",
+    "actor_ip_address": "src",
+    "actor_hostname": "srcName",
+    "policy_name": "policy",
+    "rule_name": "policy",
+    "created_at": "devTime"
+}
+# Use this mapping to prevent 
+leefFieldMappingDouble = {
+    "actor_username": "usrName",
+    "server_ip_address": "dst",
+    "server_hostname": "dstName",
+    "actor_ip_address": "src",
+    "actor_hostname": "srcName",
+    "policy_name": "policy",
+    "rule_name": "policy",
+    "created_at": "devTime"
+}
+leefLoginEventNames = [
+    "halo login success", "halo login failure", "ghostports login success", "ghostports login failure"
+]
+leefLogoutEventNames = [ "halo logout" ]
+leefDateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+leefOmitFields = [
+    "name", "critical"
+]
+leefCategoriesByName = {
+    "network service modified": "Firewall Management",
+    "halo logout": "Halo Users and Authentication",
+    "daemon compromised": "Server Events",
+    "configuration policy created": "Configuration Security Scanning Management",
+    "ghostports provisioning": "GhostPorts",
+    "api key created": "API Key Management",
+    "configuration policy deleted": "Configuration Security Scanning Management",
+    "halo user added": "Halo Users and Authentication",
+    "halo password recovery requested": "Halo Users and Authentication",
+    "network service deleted": "Firewall Management",
+    "ghostports login failure": "GhostPorts",
+    "file integrity object signature changed": "Server Events",
+    "file integrity policy assigned": "File Integrity Scanning Management",
+    "server missing": "Server Events",
+    "server shutdown": "Server Events",
+    "server un-retired": "Server Events",
+    "halo user account locked": "Halo Users and Authentication",
+    "automatic file integrity scan schedule modified": "File Integrity Scanning Management",
+    "halo login failure": "Halo Users and Authentication",
+    "intelligent event rule matched": "Server Events",
+    "halo user account unlocked": "Halo Users and Authentication",
+    "file integrity baseline expired": "File Integrity Scanning Management",
+    "file integrity scan failed": "File Integrity Scanning Management",
+    "authorized ips modified": "Halo Users and Authentication",
+    "vulnerable software package found": "Server Events",
+    "halo password recovery success": "Halo Users and Authentication",
+    "halo authentication settings modified": "Halo Users and Authentication",
+    "halo password changed": "Halo Users and Authentication",
+    "halo user reactivated": "Halo Users and Authentication",
+    "automatic file integrity scanning enabled": "File Integrity Scanning Management",
+    "api secret key viewed": "API Key Management",
+    "configuration policy exported": "Configuration Security Scanning Management",
+    "halo firewall policy assigned": "Firewall Management",
+    "server moved to another group": "Halo Daemon Management",
+    "configuration policy assigned": "Configuration Security Scanning Management",
+    "halo firewall policy deleted": "Firewall Management",
+    "configuration rule matched": "Server Events",
+    "file integrity policy deleted": "File Integrity Scanning Management",
+    "configuration policy imported": "Configuration Security Scanning Management",
+    "server ip address changed": "Server Events",
+    "file integrity policy created": "File Integrity Scanning Management",
+    "network service added": "Firewall Management",
+    "file integrity baseline failed": "File Integrity Scanning Management",
+    "ghostports session close": "GhostPorts",
+    "file integrity policy unassigned": "File Integrity Scanning Management",
+    "server retired": "Server Events",
+    "halo password authentication settings modified": "Halo Users and Authentication",
+    "local account created (linux only)": "Server Events",
+    "file integrity policy modified": "File Integrity Scanning Management",
+    "api key deleted": "API Key Management",
+    "halo user modified": "Halo Users and Authentication",
+    "halo firewall policy unassigned": "Firewall Management",
+    "file integrity exception created": "File Integrity Scanning Management",
+    "halo login success": "Halo Users and Authentication",
+    "server deleted": "Halo Daemon Management",
+    "api key modified": "API Key Management",
+    "multiple root accounts detected (linux only)": "Server Events",
+    "new server": "Halo Daemon Management",
+    "file integrity baseline": "File Integrity Scanning Management",
+    "halo password recovery request failed": "Halo Users and Authentication",
+    "file integrity object missing": "Server Events",
+    "master account linked": "Halo Users and Authentication",
+    "server firewall restore requested": "Firewall Management",
+    "server restarted": "Server Events",
+    "halo firewall policy created": "Firewall Management",
+    "halo user re-added": "Halo Users and Authentication",
+    "file integrity exception deleted": "File Integrity Scanning Management",
+    "halo user activation failed": "Halo Users and Authentication",
+    "file integrity baseline invalid": "File Integrity Scanning Management",
+    "sms phone number verified": "Halo Users and Authentication",
+    "daemon version changed": "Halo Daemon Management",
+    "file integrity scan requested": "File Integrity Scanning Management",
+    "file integrity object added": "Server Events",
+    "file integrity baseline deleted": "File Integrity Scanning Management",
+    "file integrity policy exported": "File Integrity Scanning Management",
+    "file integrity policy imported": "File Integrity Scanning Management",
+    "file integrity exception expired": "File Integrity Scanning Management",
+    "halo user deactivated": "Halo Users and Authentication",
+    "halo session timeout": "Halo Users and Authentication",
+    "server firewall modified": "Server Events",
+    "configuration policy unassigned": "Configuration Security Scanning Management",
+    "configuration policy modified": "Configuration Security Scanning Management",
+    "local account deleted (linux only)": "Server Events",
+    "halo firewall policy modified": "Firewall Management",
+    "file integrity re-baseline": "File Integrity Scanning Management",
+    "ghostports login success": "GhostPorts",
+    "automatic file integrity scanning disabled": "File Integrity Scanning Management",
+}
 
 # constants used for CEF output
 cefVersion = 0
@@ -241,6 +379,8 @@ def processCmdLineArgs(argv):
     """
     global oneEventPerLine, verbose, outputFormat, outputDestination, lastTimestamp, configDir, syslogInfo
     global redis_host, redis_port, metadataDestination, useHA, apiURL, apiPort
+    global botoAvailable, configOnS3, bucketName, eventCountLimit, batchWaitTime
+    global threadCount
     argsOK = True
     for arg in argv:
         if ((arg == '-?') or (arg == "-h")):
@@ -272,6 +412,20 @@ def processCmdLineArgs(argv):
         elif (arg.startswith('--cfgdir=') or arg.startswith('--configdir=')):
             i = arg.index('=') + 1
             configDir = arg[i:]
+            if (configDir == 'S3') or (configDir == 's3'):
+                if botoAvailable:
+                    configOnS3 = True
+                else:
+                    print >> sys.stderr, "Boto library not available, check PYTHONPATH?"
+                    return True
+        elif (arg.startswith('--bucket=')):
+            i = arg.index('=') + 1
+            bucketName = arg[i:]
+            if not botoAvailable:
+                print >> sys.stderr, "Boto library not available, check PYTHONPATH?"
+                return True
+        elif (arg.startswith('--threads=')):
+            threadCount = int(arg.split('=')[1])
         elif (arg.startswith('--jsonfile=')):
             outputFormat = 'json-file'
             outputDestination = arg[11:]
@@ -282,8 +436,34 @@ def processCmdLineArgs(argv):
             outputFormat = 'cef-file'
             outputDestination = None
         elif (arg.startswith('--cefsyslog')):
-            outputFormat = 'cef-syslog'
-            outputDestination = 'localhost'
+            if (syslogAvailable):
+                outputFormat = 'cef-syslog'
+                if (arg.startswith('--cefsyslog=')):
+                    if (not isWindows):
+                        print >> sys.stderr, "Specify syslog dest in /etc/syslog.conf (or equivalent)"
+                        argsOK = False
+                    else:
+                        outputDestination = arg.split('=')[1]
+                else:
+                    outputDestination = 'localhost'
+            else:
+                syslogNotAvailable()
+        elif (arg.startswith('--leeffile=')):
+            outputFormat = 'leef-file'
+            outputDestination = arg[11:]
+        elif (arg.startswith('--leefsyslog')):
+            if (syslogAvailable):
+                outputFormat = 'leef-syslog'
+                if (arg.startswith('--leefsyslog=')):
+                    if (not isWindows):
+                        print >> sys.stderr, "Specify syslog dest in /etc/syslog.conf (or equivalent)"
+                        argsOK = False
+                    else:
+                        outputDestination = arg.split('=')[1]
+                else:
+                    outputDestination = 'localhost'
+            else:
+                syslogNotAvailable()
         elif (arg.startswith('--kvfile=')):
             outputFormat = 'kv-file'
             outputDestination = arg[9:]
@@ -342,6 +522,10 @@ def processCmdLineArgs(argv):
         elif (arg.startswith('--ha')):
             metadataDestination = 'redis'
             useHA = True
+        elif (arg.startswith('--limit=')):
+            eventCountLimit = int(arg.split('=')[1])
+        elif (arg.startswith('--sleep=')):
+            batchWaitTime = float(arg.split('=')[1])
         elif (arg != argv[0]):
             print >> sys.stderr, "Unrecognized argument: %s" % arg
             argsOK = False
@@ -362,6 +546,9 @@ def processCmdLineArgs(argv):
                     srvType = "redis"
                 print >> sys.stderr, "If using --ha or --halite, you must specify a %s list using --redis=" % srvType
                 return True
+    if configOnS3 and (bucketName == None):
+        print >> sys.stderr, "If config is to be stored on S3, you must specify a bucket name"
+        return True
     if not argsOK:
         print >> sys.stderr, "Run \"%s -h\" to see usage info." % os.path.basename(argv[0])
         return True
@@ -423,6 +610,8 @@ def processExit():
                 remote_syslog.closelog()
         if ('redis' == metadataDestination):
             clearRedisLock()
+        elif configOnS3:
+            removeS3Lock()
         else:
             os.remove(pidFilename)
     except:
@@ -438,12 +627,18 @@ def printUsage(progName):
     print >> sys.stderr, "Usage: %s [<flag>]... " % progName
     print >> sys.stderr, "Where <flag> is one of:"
     print >> sys.stderr, "-h\t\t\tThis message"
-    print >> sys.stderr, "--auth=<file>\t\tSpecify a file containing ID/secret pairs (up to 5)"
-    print >> sys.stderr, "--url=<haloURL>\t\tSpecify the base URL for Halo access"
-    print >> sys.stderr, "--port=<portNum>\tSpecify the HTTPS port for Halo access"
+    print >> sys.stderr, "--auth=<file>\t\tSpecify a file containing CloudPassage Halo API keys - Key ID and Key secret pairs (up to 5)"
+    print >> sys.stderr, "--url=<haloURL>\t\tSpecify the base URL for CloudPassage Halo access"
+    print >> sys.stderr, "--port=<portNum>\tSpecify the HTTPS port for CloudPassage Halo access"
     print >> sys.stderr, "--starting=<time>\tSpecify start of event time range in ISO-8601 format"
-    print >> sys.stderr, "--configdir=<dir>\tSpecify directory for config files (saved timestamps)"
-    print >> sys.stderr, "--jsonfile=<filename>\tWrite raw JSON to file with given filename"
+    print >> sys.stderr, "--limit=<count>\t\tOnly process <count> events before exiting"
+    print >> sys.stderr, "--sleep=<seconds>\tWait <seconds> after each batch of events"
+    print >> sys.stderr, "--threads=<num>\t\tStart num threads each reading pages of events in parallel"
+    print >> sys.stderr, "--configdir=<dir>\tSpecify directory for configration files (saved timestamps)"
+    if botoAvailable:
+        print >> sys.stderr, "--configdir=S3\t\tSpecify an S3 bucket should be used for storing config"
+        print >> sys.stderr, "--bucket=<name>\t\tSpecify name of S3 bucket when using --configdir=S3"
+    print >> sys.stderr, "--jsonfile=<filename>\tWrite events in raw JSON format to file with given filename"
     if redisAvailable:
         print >> sys.stderr, "--halite\t\tWrite events normally, but store lock and timestamp info in redis"
         print >> sys.stderr, "--ha\t\t\tWrite events (and store lock and timestamp info) in redis cloud"
@@ -452,20 +647,24 @@ def printUsage(progName):
             print >> sys.stderr, "\t\t\tWhere zkserver:port is a list of Zookeeper nodes"
         else:
             print >> sys.stderr, "--redis[=server[:port]]\tWrite events directly to a redis DB server"
-    print >> sys.stderr, "--cef\t\t\tWrite CEF (ArcSight) to standard output (terminal)"
-    print >> sys.stderr, "--ceffile=<filename>\tWrite CEF (ArcSight) to file with given filename"
-    print >> sys.stderr, "--kv\t\t\tWrite key/value pairs to standard output (terminal)"
-    print >> sys.stderr, "--kvfile=<filename>\tWrite key/value pairs to file with given filename"
+    print >> sys.stderr, "--cef\t\t\tWrite events in CEF (ArcSight) format to standard output (terminal)"
+    print >> sys.stderr, "--ceffile=<filename>\tWrite events in CEF (ArcSight) format to file with given filename"
+    print >> sys.stderr, "--leeffile=<filename>\tWrite events in LEEF (QRadar) format to file with given filename"
+    print >> sys.stderr, "--kv\t\t\tWrite events as key/value pairs to standard output (terminal)"
+    print >> sys.stderr, "--kvfile=<filename>\tWrite events as key/value pairs to file with given filename"
     if not isWindows:
         if (syslogAvailable):
-            print >> sys.stderr, "--txtsyslog\t\tWrite general text to local syslog daemon"
+            # print >> sys.stderr, "--txtsyslog\t\tWrite general text to local syslog daemon"
+            print >> sys.stderr, "--leefsyslog\t\tWrite events in LEEF (QRadar) format to syslog server"
+            print >> sys.stderr, "--cefsyslog\t\tWrite events in CEF (ArcSight) format to syslog server"
     else:
         if (syslogAvailable):
-            print >> sys.stderr, "--txtsyslog[=<file>]\tWrite general text to local syslog daemon or file"
-    print >> sys.stderr, "--cefsyslog\t\tWrite CEF (ArcSight) format to local syslog daemon"
+            # print >> sys.stderr, "--txtsyslog[=<file>]\tWrite general text to local syslog daemon or file"
+            print >> sys.stderr, "--leefsyslog[=<server>]\tWrite events in LEEF (QRadar) format to a syslog server"
+            print >> sys.stderr, "--cefsyslog[=<server>]\tWrite events in CEF (ArcSight) format to syslog server"
     if (syslogAvailable):
         if not isWindows:
-            print >> sys.stderr, "--kvsyslog\t\tWrite key/value pairs to local syslog daemon"
+            print >> sys.stderr, "--kvsyslog\t\tWrite events as key/value pairs to local syslog daemon"
     print >> sys.stderr, "--facility=<facility.priority>\tFacility and Priority for syslog entries"
     print >> sys.stderr, "\t\t\t(Above only needed for syslog output options)"
     flist = ""
@@ -502,6 +701,22 @@ def readHAConfigFile(filename):
                 (server, port) = server.split(':')
                 port = int(port)
     return (server, port)
+
+
+def processConfigBucket(bucketName):
+    global s3conn
+    timestampMap = {}
+    if (s3conn == None):
+        s3conn = S3Connection()
+    bucket = s3conn.lookup(bucketName)
+    if bucket == None:
+        print >>sys.stderr, "Bucket %s does not exist, exiting." % bucketName
+        sys.exit(2)
+    keys = bucket.list()
+    for key in keys:
+        if (key.key != s3lock):
+            timestampMap[key.key] = key.get_contents_as_string()
+    return timestampMap
 
 
 def processConfigFile(filename):
@@ -566,7 +781,8 @@ def writeEventString(s):
                 syslogFacility = 'user'
                 if (syslogInfo):
                     syslogFacility = syslogInfo[0]
-                remote_syslog.syslog(s, remote_syslog.LEVEL[syslogLevel], remote_syslog.FACILITY[syslogFacility])
+                remote_syslog.syslog(s, remote_syslog.LEVEL[syslogLevel], remote_syslog.FACILITY[syslogFacility],
+                                     outputDestination)
 
 
 def encodeStringAsCEF(str):
@@ -675,6 +891,108 @@ def convertToTxt(ev):
     return str
 
 
+def isKeyValueInSet(obj, key, values):
+    if (key in obj) and (obj[key] in values):
+        return "true"
+    else:
+        return "false"
+
+
+def convertLeefTimestamp(timestamp):
+    # convert from "2012-07-11T17:53:16.828169Z" to "2012-07-11T17:53:16.828"
+    if (len(timestamp) == 27):
+        return timestamp[0:23]
+    else:
+        print >> sys.stderr, "Unknown time format in event: %s" % timestamp
+        return timestamp
+
+
+def capitalizeLeef(str):
+    first = str[0:1]
+    rest = str[1:]
+    return first.upper() + rest.lower()
+
+
+def convertToLeef(ev):
+    # do optional syslog header "Date<space>IP Addr<space>"
+    # next LEEF header
+    str = "LEEF:%s|%s|%s|%s|" % (leefFormatVersion, cefVendor, cefProduct, cefProductVersion)
+    custom = ""
+    eventID = ev['name'] # just needs to be unique
+    str += "%s|" % capitalizeLeef(eventID)
+    if ev['name'].lower() in leefCategoriesByName:
+        str += "cat=%s\t" % leefCategoriesByName[ev['name'].lower()]
+    else:
+        str += "cat=unknown\t"
+    severity = 3 # same non-critical severity as CEF
+    mapping = leefFieldMapping
+    if ("server_ip_address" in ev) and ("actor_ip_address" in ev):
+        mapping = leefFieldMappingDouble
+    for key in ev:
+        if key in mapping:
+            if key == "created_at":
+                str += "%s=%s\t" % (mapping[key], convertLeefTimestamp(ev[key]))
+            else:
+                str += "%s=%s\t" % (mapping[key], ev[key])
+        elif ((key == "critical") and (ev[key] == "true")):
+            severity = 9 # same critical severity as CEF
+        elif not (key in leefOmitFields):
+            custom += "%s=%s\t" % (key, ev[key])
+    str += "%s=%s\t" % ("isLoginEvent", isKeyValueInSet(ev, 'name', leefLoginEventNames))
+    str += "%s=%s\t" % ("isLogoutEvent", isKeyValueInSet(ev, 'name', leefLogoutEventNames))
+    str += "sev=%d\t" % severity
+    str += "devTimeFormat=%s\t" % leefDateFormat
+    str += custom # always put custom fields at end
+    return str
+
+
+def checkS3Lock():
+    global s3conn, bucketName, s3lock, redisLockToken
+    shouldExit = False
+    try:
+        if (s3conn == None):
+            s3conn = S3Connection()
+        bucket = s3conn.get_bucket(bucketName)
+        lockKey = bucket.get_key(s3lock)
+        if (lockKey == None):
+            # no lock, we can continue
+            lockKey = Key(bucket)
+            lockKey.key = s3lock
+            lockKey.set_contents_from_string(redisLockToken)
+            return True
+        else:
+            lockValue = lockKey.get_contents_as_string()
+            if (lockValue == redisLockToken):
+                return True
+            else:
+                print >> sys.stderr, "Another instance is accessing Halo, exiting..."
+                print >> sys.stderr, "Lock found in bucket %s" % bucketName
+                shouldExit = True
+    except:
+        print >> sys.stderr, "Obtaining lock in bucket %s failed, exiting..." % bucketName
+        print >> sys.stderr, "error: ", sys.exc_info()[0]
+        sys.exit(1)
+    if shouldExit:
+        sys.exit(1)
+    return True
+
+
+def removeS3Lock():
+    global s3conn, bucketName, s3lock, redisLockToken
+    try:
+        if (s3conn == None):
+            s3conn = S3Connection()
+        bucket = s3conn.get_bucket(bucketName)
+        lockKey = bucket.get_key(s3lock)
+        if (lockKey != None):
+            lockValue = lockKey.get_contents_as_string()
+            if (lockValue == redisLockToken):
+                lockKey.delete() # only delete if we set it
+    except:
+        print >> sys.stderr, "Error clearing lock from bucket %s" % bucketName
+        print >> sys.stderr, "error: ", sys.exc_info()[0]
+
+
 def getRedisConnection():
      global redisConnection, redisConnected
      if (not redisConnected):
@@ -765,6 +1083,9 @@ def formatEvents(eventList):
         # in CEF format, always 1-event per line
         for ev in eventList:
             writeEventString(convertToCEF(ev))
+    elif (outputFormat.startswith("leef-")):
+        for ev in eventList:
+            writeEventString(convertToLeef(ev))
     elif (outputFormat.startswith("kv-")):
         for ev in eventList:
             writeEventString(convertToKV(ev))
@@ -794,11 +1115,63 @@ def dumpEvents(json_str):
             nextLink = pagination[nextKey]
     if (eventsKey in obj):
         eventList = obj[eventsKey]
-        if useHA:
-            writeToRedis(eventList)
-        else:
-            formatEvents(eventList)
+        internalDumpEvents(eventList)
         numEvents = len(eventList)
+        if (numEvents > 0):
+            lastEvent = eventList[numEvents - 1]
+            if (timestampKey in lastEvent):
+                lastTimestamp = lastEvent[timestampKey]
+    return (nextLink, lastTimestamp)
+
+
+def internalDumpEvents(eventList):
+    """ Parses a JSON response to the request for an event batch.
+
+        The requests contains an outer wrapper object, with pagination info
+        and a list of events. We extract the pagination info (contains a link to
+        the next batch of events) and the event list. The event list is passed
+        to formatEvents() to be formatted and sent to the desired output.
+    """
+    global eventCountLimit
+    timestampKey = 'created_at'
+    lastTimestamp = None
+    numEvents = len(eventList)
+    if (eventCountLimit != None):
+        if (numEvents > eventCountLimit):
+            eventList = eventList[0:eventCountLimit]
+            numEvents = len(eventList)
+        eventCountLimit -= numEvents
+    if (numEvents > 0):
+        lastEvent = eventList[numEvents - 1]
+        if (timestampKey in lastEvent):
+            lastTimestamp = lastEvent[timestampKey]
+    if useHA:
+        writeToRedis(eventList)
+    else:
+        formatEvents(eventList)
+    return lastTimestamp
+
+
+def queueEvents(json_str,pageNum):
+    """ Adds batch of events to a queue waiting to be output in proper order
+
+        First, parses the events
+    """
+    timestampKey = 'created_at'
+    paginationKey = 'pagination'
+    nextKey = 'next'
+    eventsKey = 'events'
+    obj = json.loads(json_str)
+    nextLink = None
+    lastTimestamp = None
+    if (paginationKey in obj):
+        pagination = obj[paginationKey]
+        if ((pagination) and (nextKey in pagination)):
+            nextLink = pagination[nextKey]
+    if (eventsKey in obj):
+        eventList = obj[eventsKey]
+        numEvents = len(eventList)
+        outputQueue["%d" % pageNum] = eventList
         if (numEvents > 0):
             lastEvent = eventList[numEvents - 1]
             if (timestampKey in lastEvent):
@@ -828,6 +1201,22 @@ def retrieveEventsFromRedis():
                 redisConnection.srem(dirKey,evKey)
 
 
+def writeConfigBucket(bucketName, timestampList):
+    global s3conn
+    try:
+        if (s3conn == None):
+            s3conn = S3Connection()
+        bucket = s3conn.lookup(bucketName)
+        for entry in timestampList:
+            if ('id' in entry) and ('timestamp' in entry) and (entry['timestamp'] != None):
+                newKey = Key(bucket)
+                newKey.key = entry['id']
+                newKey.set_contents_from_string(entry['timestamp'])
+    except:
+        print >> sys.stderr, "Failed to save config info to S3 Bucket %s" % bucketName
+        print >> sys.stderr, "error: ", sys.exc_info()[0]
+
+
 def writeConfigFile(filename, timestampList):
     """ Writes the configuration file.
 
@@ -836,7 +1225,7 @@ def writeConfigFile(filename, timestampList):
     try:
         fp = open(filename, "w")
         for entry in timestampList:
-            if ('id' in entry) and ('timestamp' in entry):
+            if ('id' in entry) and ('timestamp' in entry) and (entry['timestamp'] != None):
                 fp.write("%s|%s\n" % (entry['id'], entry['timestamp']))
         fp.close()
     except IOError as e:
@@ -867,14 +1256,50 @@ def writeRedisConfig(timestampList):
 
 
 def writeTimestamp(filename, credentialList):
+    global configOnS3, bucketName
     if ('redis' == metadataDestination):
         writeRedisConfig(credentialList)
+    elif configOnS3:
+        writeConfigBucket(bucketName, credentialList)
     else:
-        writeConfigFile(configFilename, credentialList)
+        writeConfigFile(filename, credentialList)
 
 
-def processEventBatches(apiCon,credential,timestampMap,credentialList):
-    global shouldExit
+def parseURL(url):
+    tops = url.split("?")
+    base = tops[0]
+    params = []
+    if (len(tops) > 1):
+        query = tops[1]
+        params = query.split("&")
+    return { 'base': base, 'params': params }
+
+
+def changePageInURL(url, newPageNum):
+    parsed = parseURL(url)
+    query = ""
+    matched = False
+    for param in parsed['params']:
+        if (len(query) > 0):
+            query += "&"
+        if (param.startswith('page=')):
+            matched = True
+            query += "page=%d" % newPageNum
+        else:
+            query += param
+    if (not matched):
+        if (len(query) > 0):
+            query += "&"
+        query += "page=%d" % newPageNum
+    return parsed['base'] + '?' + query
+
+
+def processEventBatches(apiCon,credential,timestampMap,credentialList,configFilename):
+    return processEventBatchesByPages(apiCon,credential,timestampMap,credentialList,configFilename,-1,-1)
+
+
+def processEventBatchesByPages(apiCon,credential,timestampMap,credentialList,configFilename,start,increment):
+    global shouldExit, eventCountLimit, batchWaitTime
     (apiCon.key_id, apiCon.secret) = (credential['id'], credential['secret'])
 
     # Check that we have a key and secret. Must be obtained either in an auth file,
@@ -889,6 +1314,7 @@ def processEventBatches(apiCon,credential,timestampMap,credentialList):
         connLastTimestamp = timestampMap[credential['id']]
     else:
         connLastTimestamp = lastTimestamp  # handle timestamp per-connection
+    lastEventTimestamp = None
 
     # Now, turn key and secret into an authentication token (usually only good
     #   for 15 minutes or so) by logging in to the REST API server.
@@ -897,32 +1323,58 @@ def processEventBatches(apiCon,credential,timestampMap,credentialList):
         # no error message here, rely on cpapi.authenticate client for error message
         sys.exit(1)
 
+    pageNum = start
     # Now, prep the destination for events (open file, or connect to syslog server).
     openOutput()
     # Decide on the initial URL used for fetching events.
     nextLink = apiCon.getInitialLink(connLastTimestamp, events_per_page)
+    if (pageNum >= 0):
+        nextLink = changePageInURL(nextLink,pageNum)
 
+    retryCount = 0
     # Now, enter a "while more events available" loop.
-    while (nextLink) and (not shouldExit):
-        (batch, authError) = apiCon.getEventBatch(nextLink)
-        if (authError):
-            # An auth error is likely to happen if our token expires (after 15 minutes or so).
-            # If so, we try to renew our session by logging in again (gets a new token).
-            resp = apiCon.authenticateClient()
-            if (not resp):
-                print >> sys.stderr, "Failed to retrieve authentication token. Exiting..."
-                sys.exit(1)
-        else:
-            # If we received a batch of events, send them to the destination.
-            (nextLink, connLastTimestamp) = dumpEvents(batch)
-            # After each batch, write out config file with latest timestamp (from events),
-            #   so that if we get interrupted during the next batch, we can resume from this point.
-            credential['timestamp'] = connLastTimestamp
-            writeTimestamp(configFilename, credentialList)
-            # print "NextLink: %s\t\t%s" % (nextLink, connLastTimestamp)
-            # time.sleep(1000) # for testing only
-            if (metadataDestination == 'redis'):
-                renewRedisLock()
+    while (nextLink) and (not shouldExit) and ((eventCountLimit == None) or (eventCountLimit > 0)):
+        try:
+            (batch, authError) = apiCon.getEventBatch(nextLink)
+            if (authError):
+                # An auth error is likely to happen if our token expires (after 15 minutes or so).
+                # If so, we try to renew our session by logging in again (gets a new token).
+                resp = apiCon.authenticateClient()
+                if (not resp):
+                    print >> sys.stderr, "Failed to retrieve authentication token. Exiting..."
+                    sys.exit(1)
+            else:
+                # If we received a batch of events, send them to the destination.
+                if (increment > 0):
+                    (nextLink, connLastTimestamp) = queueEvents(batch,pageNum)
+                else:
+                    (nextLink, connLastTimestamp) = dumpEvents(batch)
+                lastEventTimestamp = connLastTimestamp
+                # After each batch, write out config file with latest timestamp (from events),
+                #  so that if we get interrupted during the next batch, we can resume from this point.
+                if (connLastTimestamp != None) and (increment < 1):
+                    credential['timestamp'] = connLastTimestamp
+                    writeTimestamp(configFilename, credentialList)
+                # print "NextLink: %s\t\t%s" % (nextLink, connLastTimestamp)
+                # time.sleep(1000) # for testing only
+                if (metadataDestination == 'redis'):
+                    renewRedisLock()
+                # sleep after each batch, if requested
+                if (batchWaitTime != None):
+                    time.sleep(batchWaitTime)
+                retryCount = 0 # after successful event-retrieval, reset count of retries
+                if (nextLink != None) and (pageNum >= 0) and (increment > 0):
+                    pageNum += increment
+                    nextLink = changePageInURL(nextLink,pageNum)
+        except (IOError, TypeError) as e:
+            # should log exact error for debugging purposes
+            if (retryCount < 3):
+                retryCount += 1
+                time.sleep(5) # sleep 5 seconds in case
+                print >> sys.stderr, "Non-fatal error, retrying"
+            else:
+                print >> sys.stderr, "Non-fatal error, too many retries, exiting"
+                break # exit loop, end stream, and rewrite check-point (if we got ANY events)
 
     # only do this if we weren't shut down prematurely
     if (not shouldExit):
@@ -930,13 +1382,18 @@ def processEventBatches(apiCon,credential,timestampMap,credentialList):
         #   so we don't always re-output the last event (REST API timestamp
         #   comparison is inclusive, so it returns events whose timestamp is
         #   later-than-or-equal-to the provided timestamp).
-        connLastTimestamp = cputils.getNowAsISO8601()
-        credential['timestamp'] = connLastTimestamp
-        writeTimestamp(configFilename, credentialList)
+        if (connLastTimestamp != None) and (lastEventTimestamp != None) and (increment < 1):
+            timeObj = cputils.strToDate(connLastTimestamp)
+            if (timeObj != None):
+                oneMicrosecond = datetime.timedelta(0,0,1)
+                newTimeObj = timeObj + oneMicrosecond
+                connLastTimestamp = cputils.formatTimeAsISO8601(newTimeObj)
+            credential['timestamp'] = connLastTimestamp
+            writeTimestamp(configFilename, credentialList)
 
 
-def processAllAccounts(authFilenameList):
-    global shouldExit
+def processAllAccounts(authFilenameList,threadCount):
+    global shouldExit, configOnS3, bucketName
     if (len(authFilenameList) == 0):
         authFilenameList = [authFilenameDefault]
 
@@ -944,6 +1401,9 @@ def processAllAccounts(authFilenameList):
     for authFilename in authFilenameList:
         if ('redis' == metadataDestination):
             timestampMap = processRedisConfig()
+        elif configOnS3:
+            configFilename = bucketName
+            timestampMap = processConfigBucket(bucketName)
         else:
             configFilename = cputils.convertAuthFilenameToConfig(authFilename)
             configFilename = os.path.join(configDir, configFilename)
@@ -970,7 +1430,18 @@ def processAllAccounts(authFilenameList):
                 if verbose:
                     print >> sys.stderr, "Using Port: %s" % apiCon.port
             apiConnections.append(apiCon)
-            processEventBatches(apiCon,credential,timestampMap,credentialList)
+            if (threadCount > 0):
+                args = { 'apiCon': apiCon, 'credential': credential, 'timestampMap': timestampMap,
+                         'credentialList': credentialList, 'configFilename': configFilename }
+                threadIndex = 0
+                while (threadIndex < threadCount):
+                    thread = ParallelThread(threadIndex + 1, threadCount, args)
+                    thread.start()
+                    threadIndex += 1
+                thread = QueueOutputThread(credential,credentialList,configFilename)
+                thread.start()
+            else:
+                processEventBatches(apiCon,credential,timestampMap,credentialList,configFilename)
             if (shouldExit):
                 break
 
@@ -982,7 +1453,7 @@ class SourceThread(threading.Thread):
 
     def run(self):
         global shouldExit
-        processAllAccounts(self.authFilenameList)
+        processAllAccounts(self.authFilenameList,0)
         shouldExit = True
 
 
@@ -997,6 +1468,59 @@ class ConsumerThread(threading.Thread):
             retrieveEventsFromRedis()
         time.sleep(2)
         retrieveEventsFromRedis()
+
+
+class ParallelThread(threading.Thread):
+    def __init__(self,start,increment,args):
+        global threadList
+        threading.Thread.__init__(self)
+        self.authFilenameList = authFilenameList
+        self.startPage = start
+        self.pageIncrement = increment
+        self.argsObj = args
+        threadList["%d" % start] = self
+
+    def run(self):
+        # print "Fetching page: %d [thread = %d]" % (pageNum, self.startPage)
+        processEventBatchesByPages(self.argsObj['apiCon'],self.argsObj['credential'],self.argsObj['timestampMap'],
+                                   self.argsObj['credentialList'],self.argsObj['configFilename'],
+                                   self.startPage,self.pageIncrement)
+        threadList.pop("%d" % self.startPage,None)
+
+
+class QueueOutputThread(threading.Thread):
+    def __init__(self, credential, credentialList, configFilename):
+        threading.Thread.__init__(self)
+        self.credential = credential
+        self.credentialList = credentialList
+        self.configFilename = configFilename
+
+    def run(self):
+        global threadList, outputQueue, shouldExit, configFilename
+        pageNum = 1
+        lastTimestamp = None
+        # print >>sys.stderr, threadList
+        while (len(threadList) > 0) or (len(outputQueue) > 0) and (not shouldExit):
+            key = "%d" % pageNum
+            if (key in outputQueue):
+                tmpTimestamp = internalDumpEvents(outputQueue[key])
+                outputQueue.pop(key,None)
+                pageNum += 1
+                if (tmpTimestamp != None):
+                    lastTimestamp = tmpTimestamp
+                    self.credential['timestamp'] = lastTimestamp
+                    writeTimestamp(self.configFilename, self.credentialList)
+            else:
+                time.sleep(0.1)
+        # print >>sys.stderr, "Exiting queue consumer thead"
+        if (not shouldExit) and (lastTimestamp != None):
+            timeObj = cputils.strToDate(lastTimestamp)
+            if (timeObj != None):
+                oneMicrosecond = datetime.timedelta(0,0,1)
+                newTimeObj = timeObj + oneMicrosecond
+                lastTimestamp = cputils.formatTimeAsISO8601(newTimeObj)
+            self.credential['timestamp'] = lastTimestamp
+            writeTimestamp(self.configFilename, self.credentialList)
 
 
 def interruptHandler(signum, frame):
@@ -1025,12 +1549,14 @@ if configDir == None:
 # Check for other instances of this script running on same host.
 if ('redis' == metadataDestination):
     checkRedisLock()
+elif configOnS3:
+    checkS3Lock()
 else:
     cputils.checkLockFile(pidFilename)
 
 catchCtrlC()
 if (not useHA):
-    processAllAccounts(authFilenameList)
+    processAllAccounts(authFilenameList,threadCount)
 else:
     srcThread = SourceThread(authFilenameList)
     dstThread = ConsumerThread()

@@ -29,25 +29,22 @@ FACILITY = {
 }
 
 LEVEL = {
-    'emerg': 0, 'alert': 1, 'crit': 2, 'err': 3,
+    'emerg': 0, 'alert':1, 'crit': 2, 'err': 3,
     'warning': 4, 'notice': 5, 'info': 6, 'debug': 7
 }
 
 syslogSocket = None
 
-
 def openlog():
     global syslogSocket
     syslogSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
 
 def syslog(message, level=LEVEL['notice'], facility=FACILITY['daemon'], host='localhost', port=514):
     """
     Send syslog UDP packet to given host and port.
     """
-    data = '<%d>%s' % (level + facility * 8, message)
+    data = '<%d>%s' % (level + facility*8, message)
     syslogSocket.sendto(data, (host, port))
-
 
 def closelog():
     syslogSocket.close()

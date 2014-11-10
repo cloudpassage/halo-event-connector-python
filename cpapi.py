@@ -98,6 +98,8 @@ class CPAPI:
             authError = False
             if hasattr(e, 'reason'):
                 print >> sys.stderr, "Failed to connect [%s] to '%s'" % (e.reason, url)
+		if (e.reason == "Unauthorized"):
+                    authError = True
             elif hasattr(e, 'code'):
                 msg = self.getHttpStatus(e.code)
                 print >> sys.stderr, "Failed to fetch events [%s] from '%s'" % (msg, url)
@@ -176,6 +178,14 @@ class CPAPI:
 
     def getServerGroupList(self):
         url = "%s:%d/%s/groups" % (self.base_url, self.port, self.api_ver)
+        (data, authError) = self.doGetRequest(url, self.authToken)
+        if (data):
+            return (json.loads(data), authError)
+        else:
+            return (None, authError)
+
+    def getServersInGroup(self,groupID):
+        url = "%s:%d/%s/groups/%s/servers" % (self.base_url, self.port, self.api_ver, groupID)
         (data, authError) = self.doGetRequest(url, self.authToken)
         if (data):
             return (json.loads(data), authError)

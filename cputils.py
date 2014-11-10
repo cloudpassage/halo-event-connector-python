@@ -306,22 +306,21 @@ def findFirewallServiceByName(fwsName, serviceList):
     return None
 
 
-def findOrCreateFirewallServices(apiCon, desired_list, svc):
+def findOrCreateFirewallServices(apiCon, desired_list):
     (response, authError) = getFirewallServiceList(apiCon)
     if ('firewall_services' in response):
         existing_list = response['firewall_services']
         for svc in desired_list:
             id = findFirewallServiceByName(svc['name'],existing_list)
-            break
-        if id == None:
-            (response, authError) = createFirewallService(apiCon,svc)
-            if ('firewall_service' in response):
-                fwsData = response['firewall_service']
-                if ('id' in fwsData):
-                    id = fwsData['id']
-                    svc['id'] = id
-    if id == None:
-        print >> sys.stderr, "Failed to create service %s" % svc['name']
+            if id == None:
+                (response, authError) = createFirewallService(apiCon,svc)
+                if ('firewall_service' in response):
+                    fwsData = response['firewall_service']
+                    if ('id' in fwsData):
+                        id = fwsData['id']
+                        svc['id'] = id
+            if id == None:
+                print >> sys.stderr, "Failed to create service %s" % svc['name']
 
 
 def createFirewallServiceObj(name,ports,protocol):
