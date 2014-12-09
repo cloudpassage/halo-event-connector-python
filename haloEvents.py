@@ -900,7 +900,8 @@ def isKeyValueInSet(obj, key, values):
 
 def convertLeefTimestamp(timestamp):
     # convert from "2012-07-11T17:53:16.828169Z" to "2012-07-11T17:53:16.828"
-    if (len(timestamp) == 27):
+    # also handles shorter input like 
+    if (len(timestamp) <= 27) and (len(timestamp) >= 24):
         return timestamp[0:23]
     else:
         print >> sys.stderr, "Unknown time format in event: %s" % timestamp
