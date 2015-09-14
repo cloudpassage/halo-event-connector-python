@@ -25,3 +25,7 @@ key_id_2|secret_2
 …
 key_id_5|secret_5
 ```
+
+<!---
+#CPTAGS:community-supported integration archive
+-->
